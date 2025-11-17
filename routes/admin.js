@@ -6,7 +6,6 @@ const db = admin.firestore();
 
 /* ---------------------- 🔐 Middlewares ---------------------- */
 
-// ✅ Verifica token Firebase (Authorization: Bearer <idToken>)
 async function verifyToken(req, res, next) {
   try {
     const authHeader = req.headers.authorization || "";
@@ -23,7 +22,6 @@ async function verifyToken(req, res, next) {
   }
 }
 
-// ✅ Verifica se o usuário é administrador
 async function verifyAdmin(req, res, next) {
   try {
     if (!req.user?.uid) return res.status(401).json({ error: "Sem credenciais" });
@@ -36,7 +34,6 @@ async function verifyAdmin(req, res, next) {
       return res.status(403).json({ error: "Acesso restrito a administradores" });
     }
 
-    req.adminCompanyId = data.companyId || null; // salva o companyId do admin logado
     next();
   } catch (err) {
     console.error("Erro verifyAdmin:", err);
@@ -44,23 +41,15 @@ async function verifyAdmin(req, res, next) {
   }
 }
 
-// 🔐 Todas as rotas abaixo são protegidas
+// Protege todas rotas admin
 router.use(verifyToken, verifyAdmin);
 
 /* ---------------------- 👥 Usuários ---------------------- */
 
-// 📋 Listar todos os usuários (ou apenas os da empresa do admin)
+// Listar
 router.get("/users", async (req, res) => {
   try {
-    let snap;
-    if (req.adminCompanyId) {
-      // lista apenas usuários da empresa do admin
-      snap = await db.collection("users").where("companyId", "==", req.adminCompanyId).get();
-    } else {
-      // se não tiver empresa associada (admin master)
-      snap = await db.collection("users").get();
-    }
-
+    const snap = await db.collection("users").get();
     const users = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     res.json(users);
   } catch (err) {
@@ -69,14 +58,24 @@ router.get("/users", async (req, res) => {
   }
 });
 
-// 🔄 Atualizar role (ex: cliente → profissional → admin)
+// Atualizar role (ex: cliente -> profissional -> admin)
+// Permite também definir companyId quando promover para profissional
 router.patch("/users/:id/role", async (req, res) => {
   try {
     const { id } = req.params;
-    const { role } = req.body;
+    const { role, companyId } = req.body;
+
     if (!role) return res.status(400).json({ error: "Campo 'role' é obrigatório" });
 
-    await db.collection("users").doc(id).update({ userRole: role });
+    const updates = { userRole: role };
+    if (role === "profissional" && companyId) updates.companyId = companyId;
+    if (role !== "profissional") updates.companyId = admin.firestore.FieldValue.delete();
+
+    await db.collection("users").doc(id).update(updates);
+
+    // Opcional: set custom claim (se desejar)
+    // await admin.auth().setCustomUserClaims(id, { admin: role === 'admin' });
+
     res.json({ message: "Role atualizado com sucesso", id, role });
   } catch (err) {
     console.error("Erro patch role:", err);
@@ -84,45 +83,11 @@ router.patch("/users/:id/role", async (req, res) => {
   }
 });
 
-// 🚀 Promover usuário (cliente → profissional / admin)
-router.post("/users/:id/promote", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { newRole } = req.body;
-
-    if (!["profissional", "admin"].includes(newRole)) {
-      return res.status(400).json({ error: "Função inválida." });
-    }
-
-    const userRef = db.collection("users").doc(id);
-    const userSnap = await userRef.get();
-    if (!userSnap.exists) return res.status(404).json({ error: "Usuário não encontrado" });
-
-    const updateData = {
-      userRole: newRole,
-      updatedAt: new Date(),
-    };
-
-    // Se for promover para profissional, vincula à empresa do admin
-    if (newRole === "profissional" && req.adminCompanyId) {
-      updateData.companyId = req.adminCompanyId;
-    }
-
-    await userRef.update(updateData);
-
-    res.json({ message: `Usuário promovido a ${newRole}`, id, ...updateData });
-  } catch (err) {
-    console.error("Erro promote user:", err);
-    res.status(500).json({ error: "Erro ao promover usuário" });
-  }
-});
-
 /* ---------------------- 📅 Agendamentos ---------------------- */
 
-// 📋 Listar todos agendamentos
 router.get("/appointments", async (req, res) => {
   try {
-    const snap = await db.collection("appointments").orderBy("createdAt", "desc").limit(100).get();
+    const snap = await db.collection("appointments").orderBy("createdAt", "desc").limit(200).get();
     const appts = await Promise.all(
       snap.docs.map(async (d) => {
         const data = d.data();
@@ -145,11 +110,10 @@ router.get("/appointments", async (req, res) => {
 
 /* ---------------------- 🔔 Notificações ---------------------- */
 
-// 📋 Listar notificações
 router.get("/notifications", async (req, res) => {
   try {
     const snap = await db.collection("notifications").orderBy("createdAt", "desc").limit(200).get();
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     res.json(list);
   } catch (err) {
     console.error("Erro /admin/notifications:", err);
@@ -157,32 +121,22 @@ router.get("/notifications", async (req, res) => {
   }
 });
 
-/* ---------------------- 📊 Painel /overview ---------------------- */
+/* ---------------------- 📊 Overview ---------------------- */
 
-// 📊 Resumo para o dashboard admin
 router.get("/overview", async (req, res) => {
   try {
-    const usersSnap = req.adminCompanyId
-      ? await db.collection("users").where("companyId", "==", req.adminCompanyId).get()
-      : await db.collection("users").get();
-
+    const usersSnap = await db.collection("users").get();
     const appointmentsSnap = await db.collection("appointments").get();
     const notificationsSnap = await db.collection("notifications").get();
 
     const recentUsersSnap = await db.collection("users").orderBy("createdAt", "desc").limit(5).get();
-    const recentAppointmentsSnap = await db
-      .collection("appointments")
-      .orderBy("createdAt", "desc")
-      .limit(5)
-      .get();
+    const recentAppointmentsSnap = await db.collection("appointments").orderBy("createdAt", "desc").limit(5).get();
 
     const recentUsers = recentUsersSnap.docs.map((d) => ({
       id: d.id,
       nome: d.data().nome,
       email: d.data().email,
-      createdAt: d.data().createdAt?._seconds
-        ? new Date(d.data().createdAt._seconds * 1000).toLocaleDateString("pt-BR")
-        : "—",
+      createdAt: d.data().createdAt?._seconds ? new Date(d.data().createdAt._seconds * 1000).toLocaleDateString("pt-BR") : "—",
     }));
 
     const recentAppointments = recentAppointmentsSnap.docs.map((d) => ({
@@ -204,8 +158,6 @@ router.get("/overview", async (req, res) => {
     res.status(500).json({ error: "Erro ao gerar overview" });
   }
 });
-
-/* ---------------------- 🧮 Estatísticas extras ---------------------- */
 
 router.get("/stats", async (req, res) => {
   try {

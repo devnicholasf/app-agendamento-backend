@@ -4,15 +4,11 @@ const router = express.Router();
 const admin = require("firebase-admin");
 const db = admin.firestore();
 
-// Listar profissionais (busca users com userRole == 'profissional')
+// GET /api/professionals -> lista todos usuários com userRole == 'profissional'
 router.get("/", async (req, res) => {
   try {
-    const q = db.collection("users").where("userRole", "==", "profissional");
-    const snapshot = await q.get();
-    const professionals = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const snap = await db.collection("users").where("userRole", "==", "profissional").get();
+    const professionals = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     res.json(professionals);
   } catch (error) {
     console.error("Erro ao listar profissionais:", error);
@@ -20,22 +16,24 @@ router.get("/", async (req, res) => {
   }
 });
 
-// (Opcional) criar profissional via Postman inserindo na coleção users
+// POST /api/professionals -> criar manualmente (opcional - apenas para admin; aqui simplificado)
 router.post("/", async (req, res) => {
   try {
-    const { uid, nome, email } = req.body;
-    if (!uid || !nome) return res.status(400).json({ error: "uid e nome obrigatórios" });
+    const { uid, name, email, companyId } = req.body;
+    if (!uid || !name || !email) return res.status(400).json({ error: "Campos obrigatórios" });
 
+    // cria/atualiza no users collection
     await db.collection("users").doc(uid).set({
-      nome,
-      email: email || "",
+      nome: name,
+      email,
       userRole: "profissional",
+      companyId: companyId || null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
 
-    res.json({ message: "Usuário promovido a profissional com sucesso!", uid });
-  } catch (error) {
-    console.error("Erro ao criar/atualizar profissional:", error);
+    res.json({ message: "Profissional criado/atualizado" });
+  } catch (err) {
+    console.error("Erro POST /api/professionals", err);
     res.status(500).json({ error: "Erro ao criar profissional" });
   }
 });

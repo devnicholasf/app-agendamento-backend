@@ -2,8 +2,9 @@
 const express = require("express");
 const router = express.Router();
 const admin = require("firebase-admin");
+const { verifyToken } = require("./verifyToken");
 
-// garante inicialização no server.js
+// Garante que o app do Firebase já foi inicializado no server.js
 if (!admin.apps.length) {
   throw new Error("Firebase não inicializado. Importe este arquivo após o initializeApp().");
 }
@@ -28,8 +29,8 @@ router.post("/", async (req, res) => {
       read: false,
     };
 
-    const docRef = await db.collection("notifications").add(notification);
-    res.status(201).json({ message: "Notificação criada com sucesso!", id: docRef.id });
+    await db.collection("notifications").add(notification);
+    res.status(201).json({ message: "Notificação criada com sucesso!" });
   } catch (error) {
     console.error("Erro ao criar notificação:", error);
     res.status(500).json({ error: "Erro ao criar notificação." });
@@ -37,36 +38,28 @@ router.post("/", async (req, res) => {
 });
 
 // Listar notificações de um usuário
-// aceita ?userId=... ou /:userId
-router.get("/", async (req, res) => {
-  try {
-    const { userId } = req.query;
-    if (!userId) return res.status(400).json({ error: "userId query é obrigatório" });
-
-    const snap = await db
-      .collection("notifications")
-      .where("userId", "==", userId)
-      .orderBy("createdAt", "desc")
-      .get();
-
-    const notifications = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    res.json(notifications);
-  } catch (error) {
-    console.error("Erro ao buscar notificações:", error);
-    res.status(500).json({ error: "Erro ao buscar notificações." });
-  }
-});
-
-router.get("/:userId", async (req, res) => {
+// Proteger leitura de notificações: o usuário deve estar autenticado e pode acessar apenas as suas próprias notificações,
+// a menos que possua claims administrativos.
+router.get("/:userId", verifyToken, async (req, res) => {
   try {
     const { userId } = req.params;
-    const snap = await db
+
+    // permitir se for o mesmo uid do token ou se tiver claim admin
+    if (req.user.uid !== userId && !req.user.admin) {
+      return res.status(403).json({ error: 'Acesso negado às notificações deste usuário.' });
+    }
+
+    const snapshot = await db
       .collection("notifications")
       .where("userId", "==", userId)
       .orderBy("createdAt", "desc")
       .get();
 
-    const notifications = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const notifications = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
     res.json(notifications);
   } catch (error) {
     console.error("Erro ao buscar notificações:", error);

@@ -1,5 +1,5 @@
 node_modules/
 serviceAccountKey.json
 *.log
-.env/serviceAccountKey.json
-node_modules/
+.env
+/.secrets

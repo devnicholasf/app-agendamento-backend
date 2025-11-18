@@ -25,7 +25,7 @@ Este é o backend do sistema de agendamento, desenvolvido em Node.js com Express
 - Node.js instalado.
 - Firebase configurado com uma conta de serviço válida.
 
-### Passos
+### 📌 Passos
 1. Clone o repositório:
    ```bash
    git clone https://github.com/devnicholasf/app-agendamento-backend

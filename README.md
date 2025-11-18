@@ -58,4 +58,4 @@ Este é o backend do sistema de agendamento, desenvolvido em Node.js com Express
 
 ## 👨‍💻 Autor
 
-Nicholas
+Desenvolvido por Nicholas

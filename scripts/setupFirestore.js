@@ -1,3 +1,5 @@
+// Moved to scripts directory for better organization.
+
 // setupFirestore.js
 const admin = require("firebase-admin");
 const serviceAccount = require("./serviceAccountKey.json");
